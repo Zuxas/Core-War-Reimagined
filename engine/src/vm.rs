@@ -262,12 +262,38 @@ impl MatchState {
     /// positions are resolved and validated *before* anything is written to
     /// core, so an error leaves the match completely unchanged. Intended to be
     /// called once on a fresh [`MatchState::from_config`].
+    ///
+    /// `config` must be the same ruleset the match was built from: its
+    /// `core_size`, `max_steps`, and `max_processes` are checked against the
+    /// live match and a mismatch is rejected with
+    /// [`WarriorLoadError::InvalidConfig`]. Otherwise a config with a larger
+    /// core than the match could resolve positions that fall outside it.
+    ///
+    /// [`WarriorLoadError::InvalidConfig`]: crate::config::WarriorLoadError::InvalidConfig
     pub fn place_and_load(
         &mut self,
         warriors: &[&crate::parser::ParsedWarrior],
         config: &crate::config::MatchConfig,
     ) -> Result<Vec<usize>, crate::config::WarriorLoadError> {
         use crate::config::WarriorLoadError;
+
+        // Phase 0: the config must match the state this match was built from,
+        // or resolved positions could be sized for a different core.
+        if config.core_size != self.core.size() {
+            return Err(WarriorLoadError::InvalidConfig(
+                "config core_size does not match the match's core size",
+            ));
+        }
+        if config.max_steps != self.max_steps {
+            return Err(WarriorLoadError::InvalidConfig(
+                "config max_steps does not match the match's step limit",
+            ));
+        }
+        if config.max_processes != self.max_processes {
+            return Err(WarriorLoadError::InvalidConfig(
+                "config max_processes does not match the match's process cap",
+            ));
+        }
 
         // Phase 1: validate lengths. No mutation yet.
         let lengths: Vec<usize> = warriors.iter().map(|w| w.instructions().len()).collect();
@@ -2639,5 +2665,18 @@ mod tests {
         assert!(matches!(err, WarriorLoadError::InvalidExplicitPosition(_)));
         assert_eq!(state.warriors().len(), 0, "partial load must not happen");
         assert_eq!(state.core().get(100).opcode, Opcode::Dat);
+    }
+
+    #[test]
+    fn place_and_load_rejects_config_that_mismatches_the_state() {
+        use crate::config::{MatchConfig, WarriorLoadError};
+        let w = crate::parse_warrior("MOV.I $0, $1").unwrap();
+        // Build an 80-cell match, then try to load with an 8000-cell config.
+        let mut state = MatchState::from_config(&MatchConfig::nano());
+        let err = state
+            .place_and_load(&[&w, &w], &MatchConfig::standard94())
+            .unwrap_err();
+        assert!(matches!(err, WarriorLoadError::InvalidConfig(_)));
+        assert_eq!(state.warriors().len(), 0);
     }
 }

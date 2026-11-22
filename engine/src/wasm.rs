@@ -175,6 +175,12 @@ impl WasmMatchState {
     /// `"standard"`, `"big"`). Core size, step limit and process cap come from
     /// the preset. Throws on an unknown preset. Load warriors with
     /// `loadWarrior` at positions from `resolvePlacement`.
+    ///
+    /// Note: unlike the native `place_and_load`, the wasm path does **not**
+    /// atomically enforce the ruleset at load time — `loadWarrior` does not
+    /// check `max_length` or placement legality, and `resolvePlacement` is a
+    /// separate call. Callers are responsible for using the positions it
+    /// returns. An atomic wasm-facing loader can follow with #197/#198.
     #[wasm_bindgen(js_name = "fromPreset")]
     pub fn from_preset(preset: &str) -> Result<WasmMatchState, JsValue> {
         let config = crate::config::MatchConfig::preset(preset)

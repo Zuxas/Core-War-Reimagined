@@ -64,6 +64,16 @@ pub enum Placement {
     Fixed,
     /// Warrior 0 at address 0; every later warrior at a seeded position that is
     /// legal against all already-placed warriors (pMARS semantics).
+    ///
+    /// Placement is **greedy, with no backtracking**: once a warrior is placed
+    /// it is never moved. This is exact for two warriors, but for three or more
+    /// an unlucky (though legal) early placement can leave no legal cell for a
+    /// later warrior, so [`resolve_placement`] may return
+    /// [`WarriorLoadError::NoValidPlacement`] even when a different arrangement
+    /// of the earlier warriors would have fit them all. Each individual
+    /// placement is still exhaustive given the already-placed warriors (the
+    /// deterministic scan in [`place_one`] never fails a cell that is legal
+    /// against them).
     Random { seed: u64 },
     /// Caller-supplied start positions, validated like any other placement.
     /// Intended for sandbox play, never for rated matches.
@@ -128,15 +138,18 @@ impl MatchConfig {
         }
     }
 
-    /// Big hill: 55,440 cells, 500,000 steps, length 200, distance 200, 8000
-    /// processes.
+    /// Big hill: 55,440 cells, 500,000 steps, length 200, distance 200, 55,440
+    /// processes (the Stormking Big Hill lists max processes = core size).
+    ///
+    /// The process cap in particular varies between big-hill definitions;
+    /// confirm against the intended ruleset if it differs.
     pub fn big() -> Self {
         Self {
             core_size: 55_440,
             max_steps: 500_000,
             max_length: 200,
             min_distance: 200,
-            max_processes: 8000,
+            max_processes: 55_440,
             placement: Placement::Fixed,
         }
     }
@@ -295,8 +308,10 @@ fn positions_all_legal(
 
 /// Find a legal start for one more warrior: try up to `core_size` seeded random
 /// candidates, then deterministically scan `0..core_size` for any legal cell.
-/// Returns `None` only when no legal cell exists (so the PRNG never spuriously
-/// fails a feasible placement just by picking bad candidates).
+/// Returns `None` only when no legal cell exists *for this warrior given the
+/// already-placed warriors* (so the PRNG never spuriously fails a position that
+/// is legal against them). It does not reconsider the earlier placements — see
+/// [`Placement::Random`] for the greedy, non-backtracking caveat.
 fn place_one(
     rng: &mut SplitMix64,
     placed: &[usize],
