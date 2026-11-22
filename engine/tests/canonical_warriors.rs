@@ -375,3 +375,72 @@ fn nested_for_rof_expands_multiplicatively() {
     }
     assert_eq!(parsed.instructions()[6].opcode, Opcode::Nop);
 }
+
+#[test]
+fn config_driven_load_places_warriors_and_runs_a_match() {
+    use core_war_engine::{MatchConfig, Placement};
+
+    let dwarf = parse_warrior(DWARF).expect("dwarf.red should parse");
+    let imp = parse_warrior(IMP).expect("imp.red should parse");
+
+    // A seeded-random ruleset: warriors land at reproducible, legal offsets.
+    let config = MatchConfig {
+        core_size: 800,
+        max_steps: 8_000,
+        max_length: 100,
+        min_distance: 100,
+        max_processes: 800,
+        placement: Placement::Random { seed: 2026 },
+    };
+
+    let mut state = MatchState::from_config(&config);
+    let positions = state
+        .place_and_load(&[&dwarf, &imp], &config)
+        .expect("both warriors should place and load");
+
+    assert_eq!(positions.len(), 2);
+    assert_eq!(positions[0], 0, "warrior 0 starts at address 0");
+    assert!(positions[1] != positions[0]);
+    // The configured core size and caps carried through.
+    assert_eq!(state.core().size(), 800);
+    assert_eq!(state.max_processes(), 800);
+    // The dwarf's first instruction really landed at its resolved offset.
+    assert_eq!(state.core().get(positions[0] as i32).opcode, Opcode::Add);
+    assert_eq!(state.warriors().len(), 2);
+
+    // The match runs to a terminal state within the step limit.
+    while state.step() {}
+    assert!(matches!(
+        state.result(),
+        MatchResult::Victory { .. } | MatchResult::Tie | MatchResult::AllDead
+    ));
+}
+
+#[test]
+fn config_driven_load_rejects_overlength_warrior() {
+    use core_war_engine::{MatchConfig, Placement, WarriorLoadError};
+
+    let dwarf = parse_warrior(DWARF).expect("dwarf.red should parse");
+    let dwarf_len = dwarf.instructions().len();
+
+    // Cap max_length below the dwarf's length so the load is rejected.
+    let config = MatchConfig {
+        core_size: 800,
+        max_steps: 8_000,
+        max_length: dwarf_len - 1,
+        min_distance: 10,
+        max_processes: 800,
+        placement: Placement::Fixed,
+    };
+
+    let mut state = MatchState::from_config(&config);
+    let err = state
+        .place_and_load(&[&dwarf], &config)
+        .expect_err("over-length warrior should be rejected");
+    assert!(matches!(
+        err,
+        WarriorLoadError::WarriorTooLong { index: 0, .. }
+    ));
+    // Atomic: nothing loaded.
+    assert_eq!(state.warriors().len(), 0);
+}

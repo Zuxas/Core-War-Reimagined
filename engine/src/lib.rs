@@ -14,6 +14,7 @@
 //! public API lives in `wasm.rs` and is only compiled when
 //! `target_arch = "wasm32"`.
 
+pub mod config;
 pub mod instruction;
 pub mod parser;
 pub mod vm;
@@ -21,6 +22,7 @@ pub mod vm;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
+pub use config::{resolve_placement, MatchConfig, Placement, SplitMix64, WarriorLoadError};
 pub use instruction::{AddressMode, Instruction, Modifier, Opcode, Operand};
 pub use parser::{parse_warrior, ParseError, ParsedWarrior};
 pub use vm::{Core, MatchResult, MatchState, Warrior};
