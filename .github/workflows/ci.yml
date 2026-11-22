@@ -235,8 +235,16 @@ jobs:
       # support — `cargo tree --target all -i rsa` shows no reachable
       # path from `core-war-backend`. Revisit when the rsa crate ships
       # a constant-time fix.
+      #
+      # RUSTSEC-2026-0459 (`libsqlite3-sys` < 0.39.0, C SQLite CVE) is the
+      # same situation: it enters via sqlx-sqlite, which sqlx-macros-core
+      # pulls in for compile-time query checking against all DB backends.
+      # This is a Postgres-only service — `cargo tree -i libsqlite3-sys`
+      # shows no reachable (normal or build) path from `core-war-backend`,
+      # so the SQLite code is never linked. The patched 0.39.0 is only
+      # reachable once sqlx bumps its sqlx-sqlite dependency; revisit then.
       - name: Audit backend deps
-        run: cargo audit --ignore RUSTSEC-2023-0071
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0459
         working-directory: backend
 
       - name: Setup Node.js
