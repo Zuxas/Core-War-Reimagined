@@ -16,13 +16,34 @@ on:
 permissions: {}
 
 jobs:
+  # The review action aborts ("Environment variable validation failed") when
+  # no credential is configured, which red-fails every PR. `secrets` can't be
+  # read in a job-level `if`, so surface the token's presence as an output and
+  # gate the review on it: the job SKIPS (not fails) until the repo sets
+  # CLAUDE_CODE_OAUTH_TOKEN, and runs normally once it does.
+  check-token:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
   claude-review:
+    needs: check-token
     # Same-repo PRs only. GitHub withholds secrets and OIDC tokens from
     # `pull_request` runs triggered by forks, so this job can only fail there.
     # Don't "fix" that with `pull_request_target` — it would hand the OAuth
     # token to a run driven by fork-controlled content. For fork PRs, a
     # maintainer can comment `@claude review this PR` (claude.yml) instead.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && needs.check-token.outputs.present == 'true'
 
     runs-on: ubuntu-latest
     permissions:
