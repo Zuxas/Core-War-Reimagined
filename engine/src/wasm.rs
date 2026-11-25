@@ -71,6 +71,43 @@ pub fn parse_warrior(source: &str) -> Result<WasmParsedWarrior, JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Resolve warrior start positions for a ruleset, returning one cell per
+/// warrior (in input order) as a `Uint32Array`.
+///
+/// `mode` is `"fixed"`, `"random"`, or `"explicit"`. `seed` (a `BigInt`) is
+/// used only for `"random"`; `explicit` (a `Uint32Array` of candidate cells)
+/// only for `"explicit"`. `lengths` is each warrior's instruction count,
+/// available from `ParsedWarrior.length()`. Throws a descriptive error string
+/// if the positions are illegal (overlap, too close, out of range, or no legal
+/// placement exists). Legality is identical to the native engine: circular
+/// `minDistance` plus footprint non-overlap.
+#[wasm_bindgen(js_name = "resolvePlacement")]
+pub fn resolve_placement(
+    core_size: usize,
+    min_distance: usize,
+    lengths: Vec<u32>,
+    mode: &str,
+    seed: u64,
+    explicit: Vec<u32>,
+) -> Result<Vec<u32>, JsValue> {
+    let lengths: Vec<usize> = lengths.iter().map(|&l| l as usize).collect();
+    let placement = match mode {
+        "fixed" => crate::config::Placement::Fixed,
+        "random" => crate::config::Placement::Random { seed },
+        "explicit" => {
+            crate::config::Placement::Explicit(explicit.iter().map(|&p| p as usize).collect())
+        }
+        other => {
+            return Err(JsValue::from_str(&format!(
+                "unknown placement mode: {other}"
+            )))
+        }
+    };
+    crate::config::resolve_placement(core_size, min_distance, &lengths, &placement)
+        .map(|positions| positions.iter().map(|&p| p as u32).collect())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 // ─── ParsedWarrior wrapper ──────────────────────────────────────────
 
 /// A warrior loaded from text source. Exposes metadata and instruction
@@ -132,6 +169,25 @@ impl WasmMatchState {
         Self {
             inner: MatchState::new(core_size, max_steps as u64),
         }
+    }
+
+    /// Create an empty match from a named preset (`"nano"`, `"tiny"`,
+    /// `"standard"`, `"big"`). Core size, step limit and process cap come from
+    /// the preset. Throws on an unknown preset. Load warriors with
+    /// `loadWarrior` at positions from `resolvePlacement`.
+    ///
+    /// Note: unlike the native `place_and_load`, the wasm path does **not**
+    /// atomically enforce the ruleset at load time — `loadWarrior` does not
+    /// check `max_length` or placement legality, and `resolvePlacement` is a
+    /// separate call. Callers are responsible for using the positions it
+    /// returns. An atomic wasm-facing loader can follow with #197/#198.
+    #[wasm_bindgen(js_name = "fromPreset")]
+    pub fn from_preset(preset: &str) -> Result<WasmMatchState, JsValue> {
+        let config = crate::config::MatchConfig::preset(preset)
+            .ok_or_else(|| JsValue::from_str(&format!("unknown preset: {preset}")))?;
+        Ok(Self {
+            inner: MatchState::from_config(&config),
+        })
     }
 
     /// Load a parsed warrior into core at `baseAddress` and register it
@@ -219,10 +275,7 @@ impl WasmMatchState {
     /// Whether the warrior at the given index is still alive.
     #[wasm_bindgen(js_name = "warriorIsAlive")]
     pub fn warrior_is_alive(&self, idx: usize) -> bool {
-        self.inner
-            .warriors()
-            .get(idx)
-            .map_or(false, |w| w.is_alive())
+        self.inner.warriors().get(idx).is_some_and(|w| w.is_alive())
     }
 
     /// How many processes the warrior at the given index has.
